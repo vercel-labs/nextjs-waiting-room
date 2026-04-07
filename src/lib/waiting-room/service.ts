@@ -14,7 +14,10 @@ import type {
   WaitingRoomStatus,
 } from "./types";
 
-export type EntryResolution = { status: "redirect"; destination: string };
+export interface EntryResolution {
+  destination: string;
+  status: "redirect";
+}
 
 export type ProtectedPageState =
   | { status: "active"; userId: string }
@@ -60,9 +63,9 @@ function estimateWaitSeconds(
   );
 }
 
-export function readAdmission(userToken: string | null | undefined):
-  | VerifiedAdmissionToken
-  | null {
+export function readAdmission(
+  userToken: string | null | undefined
+): VerifiedAdmissionToken | null {
   return verifyAdmissionToken(userToken);
 }
 
@@ -131,10 +134,10 @@ export function resolveProtectedPageState(
   };
 }
 
-export async function resolveProxyAccessDecision(input: {
+export function resolveProxyAccessDecision(input: {
   admissionToken: string | null;
   nextPath: string;
-}): Promise<ProxyAccessDecision> {
+}): ProxyAccessDecision {
   const { admissionToken, nextPath } = input;
   const verified = readAdmission(admissionToken);
 

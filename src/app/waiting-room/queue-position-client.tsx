@@ -11,7 +11,7 @@ import {
 import type { WaitingRoomStatus } from "@/lib/waiting-room/types";
 import { QueueJourneyCard } from "./queue-journey-card";
 
-const FAST_POLL_INTERVAL_MS = 5_000;
+const FAST_POLL_INTERVAL_MS = 5000;
 const MEDIUM_POLL_INTERVAL_MS = 15_000;
 const SLOW_POLL_INTERVAL_MS = 30_000;
 const MAX_BACKOFF_MS = 60_000;
@@ -52,7 +52,10 @@ function resolveNextPollInterval(status: WaitingRoomStatus | null): number {
     return SLOW_POLL_INTERVAL_MS;
   }
 
-  if (status.estimatedWait >= 60 || (status.position ?? Infinity) > 25) {
+  if (
+    status.estimatedWait >= 60 ||
+    (status.position ?? Number.POSITIVE_INFINITY) > 25
+  ) {
     return MEDIUM_POLL_INTERVAL_MS;
   }
 

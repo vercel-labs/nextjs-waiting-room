@@ -66,11 +66,7 @@ export function verifyAdmissionToken(
   }
 
   const [version, encodedPayload, providedSignature] = token.split(".");
-  if (
-    version !== TOKEN_VERSION ||
-    !encodedPayload ||
-    !providedSignature
-  ) {
+  if (version !== TOKEN_VERSION || !encodedPayload || !providedSignature) {
     return null;
   }
 

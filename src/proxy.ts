@@ -6,7 +6,10 @@ import {
   getRequestDestinationPath,
 } from "@/lib/waiting-room/cookies";
 import { resolveProxyAccessDecision } from "@/lib/waiting-room/service";
-import { COOKIE_NAME_ADMISSION, COOKIE_NAME_ID } from "@/lib/waiting-room/types";
+import {
+  COOKIE_NAME_ADMISSION,
+  COOKIE_NAME_ID,
+} from "@/lib/waiting-room/types";
 
 /**
  * Keep Proxy lean.
