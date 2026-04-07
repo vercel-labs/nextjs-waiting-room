@@ -55,6 +55,6 @@
     "ultracite": "^7.4.3"
   },
   "engines": {
-    "node": ">=18.18.0"
+    "node": "24.x"
   }
 }
