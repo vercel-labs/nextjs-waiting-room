@@ -1,6 +1,6 @@
 # Waiting Room Architecture Notes
 
-Status: working design note
+Status: implemented design note
 Last updated: 2026-04-06
 
 ## Why this doc exists
@@ -9,7 +9,7 @@ This document captures:
 
 - the first waiting-room architecture we implemented
 - why it was good enough as a demo but not good enough for extreme scale
-- the refined design we are implementing next
+- the refined design we implemented next
 - the limits and tradeoffs of the refined version
 
 It is meant to be useful in three ways:
@@ -19,6 +19,8 @@ It is meant to be useful in three ways:
 3. As raw material for a blog post about evolving a simple waiting room into a production-minded architecture.
 
 Any pricing or quota assumptions in this document are time-sensitive and should be re-verified before publication.
+
+Version 1 was preserved as the initial git baseline. The repository now reflects Version 2.
 
 ## The problem we are solving
 
@@ -44,9 +46,11 @@ The first version was intentionally straightforward:
 - Redis stores active sessions, the FIFO queue, and recent session durations.
 - A Lua script atomically decides whether a user is admitted or queued.
 
-### Current implementation references
+### Historical Version 1 references
 
-These files represent the current Version 1 design:
+Version 1 is preserved in git history as the initial baseline commit.
+
+These are the major files that existed in that architecture:
 
 - `src/proxy.ts`
 - `src/lib/waiting-room/service.ts`
@@ -245,7 +249,7 @@ Said differently:
 
 The expensive part of a waiting room is not checking the front door once. It is letting the whole crowd knock every few seconds.
 
-## Version 2: the refined architecture we are implementing
+## Version 2: the refined architecture we implemented
 
 The refined design keeps the good parts of Version 1 while changing the cost model.
 
@@ -259,6 +263,21 @@ The refined design keeps the good parts of Version 1 while changing the cost mod
 - operational controls should remain easy to change
 
 ## Version 2 architecture
+
+### Current implementation references
+
+These files now represent the Version 2 implementation:
+
+- `src/proxy.ts`
+- `src/lib/waiting-room/admission-token.ts`
+- `src/lib/waiting-room/service.ts`
+- `src/lib/waiting-room/lua/try-admit.ts`
+- `src/lib/waiting-room/providers/upstash.ts`
+- `src/lib/waiting-room/providers/ioredis.ts`
+- `src/app/api/waiting-room/init/route.ts`
+- `src/app/api/waiting-room/status/route.ts`
+- `src/app/waiting-room/page.tsx`
+- `src/app/waiting-room/queue-position-client.tsx`
 
 ### 1. Signed admission token for the hot path
 
