@@ -18,9 +18,7 @@ export class IORedisProvider implements WaitingRoomProvider {
     this.redis =
       redis ??
       new Redis(
-        process.env.REDIS_URL ??
-          process.env.KV_URL ??
-          "redis://localhost:6379"
+        process.env.REDIS_URL ?? process.env.KV_URL ?? "redis://localhost:6379"
       );
 
     this.redis.defineCommand(COMMAND_NAME, {
