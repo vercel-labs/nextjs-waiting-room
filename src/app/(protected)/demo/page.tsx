@@ -131,10 +131,7 @@ export default async function ProtectedDemoPage() {
         </div>
       </main>
 
-      <SessionFooter
-        backendLabel={backendLabel}
-        sessionId={state.userId}
-      />
+      <SessionFooter backendLabel={backendLabel} sessionId={state.userId} />
     </div>
   );
 }
