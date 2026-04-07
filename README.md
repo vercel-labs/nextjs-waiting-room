@@ -182,6 +182,33 @@ For local development only.
 - **Queue heartbeat cleanup**: Drops stale queue entries lazily from the front so abandoned users do not permanently block admission.
 - **Adaptive polling**: The client polls quickly near the front of the queue and more slowly when the user is far away.
 
+## Production Reality Check
+
+This repository is intentionally optimized for a cheap admitted path and
+economical queue coordination. That means a few stronger guarantees are
+deliberately out of scope in the current implementation.
+
+- **Queue identity is continuity, not strong identity**: The stable waiting-room cookie is what preserves a user's place in line. That keeps the design simple and cheap, but it also means the queue identity behaves more like a bearer credential than a full auth session. A stronger design would bind queue identity to more server-side state or extra device signals, which adds more reads, writes, and operational complexity.
+- **Fairness begins on first status contact**: The current flow does not allocate a Redis ticket during `/api/waiting-room/init`; the ticket is allocated on the first `/api/waiting-room/status` poll. That is cheaper because every redirected miss does not immediately become a Redis write, including bots, refresh churn, and users who bounce. The stricter alternative is closer to "arrival-time fairness," but it makes queue join cost scale with every protected-route miss.
+- **Token renewal is optimistic**: Near expiry, `src/proxy.ts` refreshes the cookie immediately and renews Redis state in the background. That keeps admitted traffic fast, but it can temporarily oversubscribe capacity if the background renewal fails after the new token is minted. The stricter alternative is to block on renewal or re-check Redis more often, which pushes network cost and latency back into the hot path.
+- **Fail-open is an availability choice, not a fairness choice**: The default behavior favors keeping the site reachable when Redis is unavailable. That is often the right tradeoff for a marketing launch, but it is the wrong default for hard inventory ceilings. A fail-closed posture is safer for scarce goods, but it also turns provider incidents into customer-visible lockouts.
+- **Queue admission is not purchase authority**: This repo controls access to the protected page. It does not create an inventory hold, serialize checkout, or make downstream writes idempotent. If the protected experience sells scarce inventory, you still need separate reservation, idempotency, and anti-bot controls after admission.
+
+The deeper tradeoff analysis in [`docs/waiting-room-scale-architecture.md`](./docs/waiting-room-scale-architecture.md) explains why these lighter guarantees can be much cheaper at launch scale than the stricter alternatives.
+
+## Production Guardrails
+
+The waiting room should be one layer in a larger launch posture, not the only
+line of defense.
+
+- **Filter abuse before the queue pays for it**: Put [Vercel Firewall](https://vercel.com/docs/security/vercel-firewall) in front of the waiting room and enable the managed protections that fit your traffic profile.
+- **Treat queue churn as suspicious traffic**: Add Firewall rules for `src/proxy.ts`'s protected paths plus `/api/waiting-room/init` and `/api/waiting-room/status`. Prefer `challenge` or `rate_limit` actions for suspicious retries so bots do not turn queue polling into an application cost amplifier.
+- **Use BotID on protected mutations, not as a queue replacement**: Keep `proxy.ts` as the GET-side gate, then add [BotID](https://vercel.com/docs/botid/get-started) to expensive POST routes or Server Actions after admission, such as checkout, reservation, or promo-claim flows.
+- **Keep an incident switch ready**: Use Edge Config for capacity and fail-open tuning, and keep [Attack Challenge Mode](https://vercel.com/docs/rest-api/security/update-attack-challenge-mode) as an emergency control for active launch abuse.
+- **Make trusted traffic explicit**: Internal webhooks, staff tools, synthetic monitoring, and operational IP ranges should bypass the queue intentionally rather than competing with real users.
+
+The deeper architecture notes in [`docs/waiting-room-scale-architecture.md`](./docs/waiting-room-scale-architecture.md) include a route-by-route recommendation for how these layers fit together.
+
 ## Project Structure
 
 ```plaintext

@@ -398,16 +398,130 @@ So platform protections matter:
 
 App code should not be the first line of defense if we can help it.
 
+### 10. Separate edge filtering, queue admission, and protected actions
+
+The waiting room should not be the only security control in the system.
+
+A more resilient launch posture has three layers:
+
+1. edge filtering that blocks or challenges obviously hostile traffic before the app pays for it
+2. queue admission that decides who may view the protected experience
+3. protected-action verification that hardens expensive POST routes and Server Actions after admission
+
+That separation matters because these layers solve different problems.
+
+The queue solves:
+
+- fairness
+- admission pacing
+- downstream load shaping
+
+The edge layer solves:
+
+- abusive retries
+- scraper churn
+- generic bot traffic
+- request floods that should never reach app code
+
+The protected-action layer solves:
+
+- fake browser automation that gets past the queue page
+- scripted checkout or reservation attempts
+- repeated mutation attempts against inventory or payments
+
+#### Where Vercel Firewall fits
+
+[Vercel Firewall](https://vercel.com/docs/security/vercel-firewall) should sit
+in front of the waiting room as the first gate.
+
+That is the right place for:
+
+- managed bot protection
+- OWASP and general WAF protections
+- custom path-based rules for queue endpoints
+- edge rate limiting
+- emergency browser challenges during an attack
+
+This is especially important because the most expensive launch traffic is often
+not the first request to the queue. It is the repeated retry traffic against the
+join and status endpoints.
+
+#### Where BotID fits
+
+[BotID](https://vercel.com/docs/botid/get-started) is best used after a user
+has already been admitted into the protected experience.
+
+That makes it a strong fit for:
+
+- checkout POST routes
+- reserve-inventory actions
+- claim-code flows
+- account creation or other high-value Server Actions
+
+It is not a replacement for the waiting room itself because:
+
+- the protected GET route still needs a cheap admission decision before render
+- the queue must continue shaping launch traffic independently of client JS
+- obvious abuse is cheaper to stop in Firewall than in application code
+
+So the refined model should be:
+
+- Firewall first
+- waiting room second
+- BotID on protected mutations third
+
+#### Route-by-route policy suggestion
+
+| Surface | Recommended control |
+| :--- | :--- |
+| Protected GET route (`/demo` in this repo) | Keep the signed admission token check in `src/proxy.ts`. Optionally challenge suspicious traffic in Firewall before the request reaches Proxy. |
+| `/api/waiting-room/init` | Add aggressive Firewall `rate_limit` or `challenge` behavior for suspicious retries. This route should not become a cheap way to churn queue identity. |
+| `/api/waiting-room/status` | Keep adaptive polling in app code, then add Firewall protection for abusive refresh behavior. Legitimate clients should not need high-frequency retries. |
+| Expensive POST routes or Server Actions after admission | Require admission, then verify BotID, add idempotency, and keep inventory or payment writes serialized. |
+| Internal callbacks, staff tools, and synthetic monitoring | Add explicit bypass rules, allowlists, or a separate hostname so trusted traffic does not compete with the launch queue. |
+
+When path-only edge rules are not expressive enough, route handlers can add
+application-aware limits with the [Vercel Firewall rate-limiting
+SDK](https://vercel.com/docs/vercel-firewall/vercel-waf/rate-limiting-sdk).
+That should be a second-line control behind Firewall, not the only defense.
+
+#### Operational guardrails we should document
+
+We should treat operator controls as part of the architecture, not as an
+afterthought.
+
+The main control surfaces are:
+
+- Edge Config for capacity, session TTL, queue TTL, and fail-open behavior
+- Firewall configuration for managed protections, custom rules, and rate limits
+- [Attack Challenge Mode](https://vercel.com/docs/rest-api/security/update-attack-challenge-mode) for incident response during active abuse
+- observability for challenged traffic, queue joins, poll volume, admission rate, and token renewals
+
+That gives us separate levers for:
+
+- pacing normal traffic
+- defending against abusive traffic
+- responding quickly when the threat profile changes mid-launch
+
+#### Additional architecture refinements worth considering
+
+Beyond the current implementation, these are high-value next steps:
+
+- Add a launch-scoped token version or epoch so operators can invalidate an admission wave quickly without rotating every secret.
+- Keep queue identity, admission, and protected mutations as separate trust domains. A queue cookie proves continuity, not purchase authority.
+- Add idempotency keys to protected mutations. The waiting room controls entry order, but it does not make downstream side effects safe by itself.
+- Consider a pre-queue challenge flow when abuse economics dominate and even the queue endpoints become too expensive to expose broadly.
+
 ## Version 2 request flow
 
 1. User requests the protected route.
 2. `proxy.ts` checks for a signed admission token.
 3. If the token is valid, the request proceeds without Redis.
 4. If no token is present, the user is redirected into the queue join flow.
-5. The join route allocates a queue ticket and writes queue identity cookies.
+5. The init route writes queue identity cookies and redirects the browser into the waiting-room shell.
 6. The waiting-room page renders a lightweight shell.
 7. The browser polls status adaptively, with jitter.
-8. The status endpoint checks a cheap eligibility condition.
+8. The status endpoint joins the queue on first contact, then checks a cheap eligibility condition on later polls.
 9. When the user becomes eligible, the server mints a signed admission token.
 10. The browser is redirected back to the protected route.
 
@@ -425,6 +539,148 @@ Just as importantly, Version 2 makes the architecture easier to reason about:
 - queue state stays authoritative in one place
 - the hot path becomes mostly local token verification
 - the expensive work is pushed to rarer state transitions
+
+## What Version 2 deliberately does not guarantee
+
+This is where we should be candid.
+
+The current implementation is a production-minded waiting room, but it is still
+an intentionally cost-shaped design. Some stronger guarantees were left out on
+purpose because they move work back onto the most expensive paths.
+
+### Queue identity is continuity, not strong identity
+
+The current implementation preserves queue continuity with a stable browser
+cookie, and the active-session state is keyed by that identifier.
+
+That keeps the model cheap:
+
+- no extra auth handshake on queue join
+- no user-account dependency
+- no Redis check on the admitted GET hot path
+
+But it also means queue identity behaves more like a bearer credential than a
+full authentication session.
+
+If a queue identity is copied between browsers, continuity can move with it.
+That is acceptable for a lightweight waiting-room demo and reference
+architecture. It is not the same thing as proving that a specific human or
+device earned the slot.
+
+The stricter alternative is to add stronger binding, for example:
+
+- signed or versioned queue identity with rotation
+- server-side metadata consulted during admission or refresh
+- extra device or request binding signals
+
+Those approaches can absolutely be worth it, but they cost more:
+
+- more Redis or database reads and writes
+- harder recovery flows when cookies expire or browsers switch
+- more operator complexity around revocation, rotation, and customer support
+
+### Fairness begins on first status contact, not first redirect
+
+Version 2 keeps `/api/waiting-room/init` cheap. The init route writes queue
+identity cookies and redirects to the shell, but the actual Redis ticket is not
+allocated until the first `/api/waiting-room/status` call.
+
+That choice is intentional.
+
+It avoids turning every protected-route miss into a Redis write, including:
+
+- users who bounce before the queue loads
+- refresh churn
+- generic bot traffic
+- abusive retries that should ideally be blocked before the app pays for them
+
+The tradeoff is that fairness begins when the browser first reaches the status
+endpoint, not when the browser first receives the redirect. Faster clients or
+more aggressive retry behavior can therefore get slightly better placement than
+slower clients that arrived at roughly the same time.
+
+The stricter alternative is to allocate a ticket in the init route.
+
+That improves arrival-order fidelity, but it also makes queue cost scale with
+every redirect into the waiting room, including traffic that never becomes a
+real queued user. At large launch volumes, that is a meaningful cost
+multiplier.
+
+### Renewal is optimistic, so brief over-admission is possible
+
+The admitted path in Version 2 is cheap because `src/proxy.ts` verifies the
+signed admission token locally and only renews Redis state infrequently.
+
+Near expiry, the proxy sends back a fresh admission cookie immediately and
+renews the backing active-session entry in the background.
+
+That is good for latency and cost:
+
+- admitted requests do not block on Redis
+- the common path stays mostly local and stateless
+- renewal work is infrequent instead of universal
+
+But it means the system accepts a small correctness tradeoff.
+
+If a background renewal fails after a fresh admission token has already been
+minted, the original slot can expire in Redis and another user can be admitted
+before the renewed user times out locally. For a short window, capacity can be
+oversubscribed.
+
+The stricter alternative is to renew synchronously or re-check Redis more
+aggressively near expiry. That improves correctness, but it reintroduces
+cross-network coordination into the admitted hot path, which is the exact cost
+shape Version 2 was designed to avoid.
+
+### Fail-open protects availability, not scarce inventory
+
+The current implementation supports fail-open behavior so the site can keep
+serving traffic if the provider is unavailable.
+
+That is a defensible choice for:
+
+- marketing launches
+- content releases
+- experiences where showing the page is better than a total outage
+
+It is a much less comfortable choice for:
+
+- scarce inventory
+- hard ticket caps
+- any flow where oversubscription is worse than temporary unavailability
+
+The stricter alternative is fail-closed.
+
+That protects fairness and inventory better during provider incidents, but it
+also means a Redis outage or control-plane failure can become a full customer
+lockout. There is no universally correct default here. It is a product and
+operations decision.
+
+### Queue admission is not purchase authority
+
+The waiting room decides who may access the protected GET route.
+
+It does not by itself guarantee:
+
+- inventory reservation
+- checkout serialization
+- payment idempotency
+- one-purchase-per-user enforcement
+
+This distinction matters because a queue token is much cheaper than a
+sale-specific reservation system.
+
+The stricter alternative is to add protected-action controls such as:
+
+- inventory holds or checkout leases
+- mutation idempotency keys
+- launch-scoped reservation tokens
+- BotID or similar bot checks on expensive POST routes
+
+Those are absolutely the right next layer for real drops or ticket sales. They
+are also more expensive than page admission because they require additional
+writes, stronger consistency around scarce state, and tighter coupling to the
+protected application.
 
 ## What we should be honest about in a future blog post
 
