@@ -2,7 +2,7 @@
 
 Deploy a waiting room in front of a Next.js route on Vercel. This repo shows how to keep the protected-route hot path cheap with signed admission tokens, use Redis only for queue transitions, and preserve the original destination through the full queue flow.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fnextjs-waiting-room&env=WAITING_ROOM_PROVIDER,UPSTASH_REDIS_REST_URL,UPSTASH_REDIS_REST_TOKEN&envDescription=Configure%20your%20waiting%20room%20provider%20and%20Redis%20credentials&envLink=https%3A%2F%2Fgithub.com%2Fvercel%2Fnextjs-waiting-room%23configuration)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fnextjs-waiting-room)
 
 ## Features
 
@@ -145,9 +145,25 @@ For production deployments on Vercel, you can use [Edge Config](https://vercel.c
 | `waitingRoomQueueTtlSeconds` | number | `WAITING_ROOM_QUEUE_TTL_SECONDS` |
 | `waitingRoomFailOpen` | boolean | `WAITING_ROOM_FAIL_OPEN` |
 
+**Example Edge Config payload:**
+
+```json
+{
+  "waitingRoomCapacity": 100,
+  "waitingRoomSessionTtlSeconds": 300,
+  "waitingRoomQueueTtlSeconds": 1800,
+  "waitingRoomFailOpen": true
+}
+```
+
+Only these flat top-level keys are read by the waiting room. Generic example
+keys like `{"greeting":"hello world"}` are ignored by this app. You can store
+just the keys you want to override; missing keys fall back to env vars and then
+to the built-in defaults.
+
 **Precedence:** Edge Config → env vars → hardcoded defaults.
 
-**What stays in env vars only:** Secrets (`UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `REDIS_URL`, `WAITING_ROOM_TOKEN_SECRET`) and deploy-time decisions (`WAITING_ROOM_PROVIDER`, `WAITING_ROOM_NAMESPACE`) are never read from Edge Config.
+**What stays in env vars only:** Secrets (`KV_REST_API_URL`, `KV_REST_API_TOKEN`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `KV_URL`, `REDIS_URL`, `WAITING_ROOM_TOKEN_SECRET`) and deploy-time decisions (`WAITING_ROOM_PROVIDER`, `WAITING_ROOM_NAMESPACE`) are never read from Edge Config.
 
 Edge Config is optional — the waiting room works identically with just env vars.
 
@@ -157,14 +173,14 @@ Edge Config is optional — the waiting room works identically with just env var
 
 Recommended for serverless environments (Vercel).
 
-- **Env Vars**: `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
+- **Env Vars**: `KV_REST_API_URL`, `KV_REST_API_TOKEN` from the Vercel Marketplace / Vercel KV integration, or the legacy `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
 - **Setup**: Set `WAITING_ROOM_PROVIDER=upstash`.
 
 ### IORedis
 
 For self-hosted Redis instances.
 
-- **Env Vars**: `REDIS_URL`
+- **Env Vars**: `REDIS_URL` or `KV_URL`
 - **Setup**: Set `WAITING_ROOM_PROVIDER=ioredis`.
 
 ### Memory
