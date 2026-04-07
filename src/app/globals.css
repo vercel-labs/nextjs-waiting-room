@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  font-family: var(--font-geist-sans), sans-serif;
+  color: var(--foreground);
+  background: var(--background);
+}
+
+@keyframes queue-marker-beacon {
+  0%,
+  100% {
+    box-shadow: 0 0 3px var(--qj-accent-glow);
+  }
+
+  50% {
+    box-shadow: 0 0 6px var(--qj-accent-glow);
+  }
+}
+
+.queue-journey-shell {
+  --qj-accent: #38bdf8;
+  --qj-accent-glow: color-mix(in srgb, #38bdf8 22%, transparent);
+  position: relative;
+}
+
+.queue-journey-markers {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--marker-count, 6), minmax(0, 1fr));
+  padding: 0.4rem 0.6rem;
+}
+
+.queue-journey-markers::before {
+  position: absolute;
+  top: 50%;
+  right: calc(100% / var(--marker-count, 6) / 2);
+  left: calc(100% / var(--marker-count, 6) / 2);
+  height: 1px;
+  pointer-events: none;
+  content: "";
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+  transform: translateY(-50%);
+}
+
+.queue-journey-marker {
+  position: relative;
+  z-index: 1;
+  justify-self: center;
+  width: 0.5rem;
+  height: 0.5rem;
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--foreground) 16%, transparent);
+  border-radius: 9999px;
+  transition:
+    background 280ms ease,
+    border-color 280ms ease,
+    box-shadow 280ms ease;
+}
+
+.queue-journey-marker-passed {
+  background: var(--qj-accent);
+  border-color: var(--qj-accent);
+  animation: queue-marker-beacon 2.2s ease-in-out infinite;
+}

@@ -1,0 +1,60 @@
+{
+  "name": "nextjs-waiting-room",
+  "version": "1.0.0",
+  "description": "A provider-agnostic virtual waiting room for Next.js 16 with FIFO queue, atomic admission, and fail-open circuit breaker.",
+  "author": "Mario Lopez Martinez <mario.lopez@vercel.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/vercel-labs/nextjs-waiting-room#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vercel-labs/nextjs-waiting-room.git"
+  },
+  "bugs": {
+    "url": "https://github.com/vercel-labs/nextjs-waiting-room/issues"
+  },
+  "keywords": [
+    "nextjs",
+    "waiting-room",
+    "queue",
+    "rate-limiting",
+    "redis",
+    "upstash",
+    "vercel",
+    "proxy",
+    "fifo",
+    "circuit-breaker"
+  ],
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "ultracite check",
+    "lint:fix": "ultracite fix",
+    "lint:fix:unsafe": "ultracite fix --unsafe"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.37.0",
+    "@vercel/edge-config": "^1.4.3",
+    "canvas-confetti": "^1.9.4",
+    "ioredis": "^5.10.1",
+    "next": "16.2.2",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.10",
+    "@tailwindcss/postcss": "^4.2.2",
+    "@types/canvas-confetti": "^1.9.0",
+    "@types/node": "^25.5.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "babel-plugin-react-compiler": "1.0.0",
+    "tailwindcss": "^4.2.2",
+    "typescript": "^5",
+    "ultracite": "^7.4.3"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  }
+}
