@@ -7,9 +7,24 @@ import { COOKIE_NAME_ADMISSION } from "@/lib/waiting-room/types";
 import { PurchaseButton } from "../purchase-button";
 import { SessionFooter } from "../session-footer";
 
+function resolveBackendLabel(provider = process.env.WAITING_ROOM_PROVIDER) {
+  switch (provider) {
+    case "upstash":
+      return "Upstash";
+    case "ioredis":
+      return "IORedis";
+    case "memory":
+    case undefined:
+      return "Memory";
+    default:
+      return provider;
+  }
+}
+
 export default async function ProtectedDemoPage() {
   const cookieStore = await cookies();
   const admissionToken = cookieStore.get(COOKIE_NAME_ADMISSION)?.value;
+  const backendLabel = resolveBackendLabel();
   const state = await resolveProtectedPageState(
     admissionToken ?? null,
     DEFAULT_AFTER_WAITING_ROOM_PATH
@@ -116,7 +131,10 @@ export default async function ProtectedDemoPage() {
         </div>
       </main>
 
-      <SessionFooter sessionId={state.userId} />
+      <SessionFooter
+        backendLabel={backendLabel}
+        sessionId={state.userId}
+      />
     </div>
   );
 }
