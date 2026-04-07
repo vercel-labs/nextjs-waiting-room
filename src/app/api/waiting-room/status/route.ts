@@ -1,6 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { createAdmissionToken } from "@/lib/waiting-room/admission-token";
 import { resolveConfig } from "@/lib/waiting-room/config";
-import { getIdentityCookieOptions } from "@/lib/waiting-room/cookies";
+import {
+  getAdmissionCookieOptions,
+  getIdentityCookieOptions,
+} from "@/lib/waiting-room/cookies";
 import { parseDemoSimulationState } from "@/lib/waiting-room/demo-simulation";
 import { resolveWaitingRoomStatus } from "@/lib/waiting-room/service";
 import type {
@@ -8,6 +12,7 @@ import type {
   WaitingRoomStatus,
 } from "@/lib/waiting-room/types";
 import {
+  COOKIE_NAME_ADMISSION,
   COOKIE_NAME_DEMO_SIMULATION,
   COOKIE_NAME_ID,
 } from "@/lib/waiting-room/types";
@@ -33,6 +38,13 @@ function createStatusResponse(
     userId,
     getIdentityCookieOptions(config)
   );
+  if (status.status === "admitted") {
+    response.cookies.set(
+      COOKIE_NAME_ADMISSION,
+      createAdmissionToken(userId),
+      getAdmissionCookieOptions(config)
+    );
+  }
   return response;
 }
 

@@ -3,58 +3,20 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { DEFAULT_AFTER_WAITING_ROOM_PATH } from "@/lib/waiting-room/cookies";
 import { resolveProtectedPageState } from "@/lib/waiting-room/service";
-import { COOKIE_NAME_ID } from "@/lib/waiting-room/types";
+import { COOKIE_NAME_ADMISSION } from "@/lib/waiting-room/types";
 import { PurchaseButton } from "../purchase-button";
 import { SessionFooter } from "../session-footer";
 
 export default async function ProtectedDemoPage() {
   const cookieStore = await cookies();
-  const userId = cookieStore.get(COOKIE_NAME_ID)?.value;
+  const admissionToken = cookieStore.get(COOKIE_NAME_ADMISSION)?.value;
   const state = await resolveProtectedPageState(
-    userId ?? null,
+    admissionToken ?? null,
     DEFAULT_AFTER_WAITING_ROOM_PATH
   );
 
   if (state.status === "redirect") {
     redirect(state.destination);
-  }
-
-  if (state.status === "degraded") {
-    return (
-      <div className="flex min-h-screen flex-col">
-        <header className="border-foreground/10 border-b">
-          <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-5">
-            <Link
-              className="font-mono text-foreground/45 text-xs uppercase tracking-[0.2em] transition hover:text-foreground"
-              href="/"
-            >
-              Next.js Waiting Room
-            </Link>
-            <Link
-              className="font-mono text-foreground/50 text-xs transition hover:text-foreground"
-              href="/"
-            >
-              Overview
-            </Link>
-          </div>
-        </header>
-
-        <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center px-6 py-8 text-center">
-          <div className="space-y-3">
-            <h1 className="font-mono font-semibold text-2xl tracking-tight">
-              Demo (degraded)
-            </h1>
-            <p className="font-mono text-foreground/50 text-sm">
-              Waiting room unavailable. Traffic is still admitted.
-            </p>
-          </div>
-        </main>
-
-        {state.userId ? (
-          <SessionFooter activeCount={0} sessionId={state.userId} />
-        ) : null}
-      </div>
-    );
   }
 
   return (
@@ -154,7 +116,7 @@ export default async function ProtectedDemoPage() {
         </div>
       </main>
 
-      <SessionFooter activeCount={state.activeCount} sessionId={state.userId} />
+      <SessionFooter sessionId={state.userId} />
     </div>
   );
 }

@@ -60,10 +60,12 @@ export type QueuedWaitingRoomStatus = Extract<
 >;
 
 /**
- * Base provider interface.
+ * Shared waiting-room provider contract.
  *
- * All providers implement this. Providers that don't support FIFO queue
- * ordering set `supportsQueue: false`; the UI adapts accordingly.
+ * The hot path is intentionally narrow:
+ * - `tryAdmit()` is the authoritative queue transition check
+ * - `hasSession()` and `renewSession()` are used for admitted-session renewal
+ * - `getActiveCount()` exists for demo stats, not the protected route
  */
 export interface WaitingRoomProvider {
   /**
@@ -74,72 +76,30 @@ export interface WaitingRoomProvider {
 
   /**
    * Check if a user has an active session.
-   * Called in proxy.ts on every request (~1-3ms Redis EXISTS/HGET).
+   * Used by status checks and demo stats. The proxy hot path uses signed
+   * admission tokens instead of consulting the provider for every request.
    */
   hasSession(userId: string): Promise<boolean>;
 
   /**
    * Renew an active session's TTL.
-   * Called via `event.waitUntil()` in proxy — never blocking the response.
+   * Called infrequently via `event.waitUntil()` in proxy when an admission
+   * token is nearing expiry.
    */
   renewSession(userId: string): Promise<void>;
-  /**
-   * Whether this provider can be used safely from Proxy for session checks.
-   *
-   * In-memory state is process-local, so proxy and app routes may observe
-   * different data during local development.
-   */
-  readonly supportsProxyVerification: boolean;
-  readonly supportsQueue: boolean;
 
   /**
    * Atomically attempt to admit a user.
    *
-   * If capacity is available AND the user is next in queue (for queued
-   * providers), the session is created and the user is removed from the
-   * queue — all in a single atomic operation.
-   *
-   * If capacity is full, the user is added to the queue (idempotent via
-   * ZADD NX for Redis providers).
+   * Implementations should:
+   * - purge expired active sessions
+   * - join the queue if the user is not already queued
+   * - admit the user if capacity is available and they are at the front
+   * - otherwise return the user's current queue position
    *
    * Returns the result of the attempt.
    */
   tryAdmit(userId: string): Promise<AdmitResult>;
-}
-
-/**
- * Extended provider interface for backends that support FIFO queue ordering.
- *
- * Redis-backed providers implement this, enabling position tracking and
- * wait-time estimation in the UI.
- */
-export interface QueuedWaitingRoomProvider extends WaitingRoomProvider {
-  /**
-   * Get an estimated wait time in seconds using a rolling average
-   * of recent session durations.
-   *
-   * Formula: position × avgSessionDuration / capacity
-   *
-   * Accepts an optional known position so callers can avoid a second
-   * queue lookup when they already have the latest rank.
-   */
-  getEstimatedWait(userId: string, position?: number | null): Promise<number>;
-
-  /**
-   * Get the user's current position in the queue (1-indexed).
-   * Returns null if the user is not in the queue.
-   */
-  getPosition(userId: string): Promise<number | null>;
-  readonly supportsQueue: true;
-}
-
-/**
- * Type guard: check if a provider supports queue operations.
- */
-export function isQueuedProvider(
-  provider: WaitingRoomProvider
-): provider is QueuedWaitingRoomProvider {
-  return provider.supportsQueue === true;
 }
 
 /**
@@ -163,5 +123,5 @@ export interface WaitingRoomConfig {
  * Cookie names used by the waiting room.
  */
 export const COOKIE_NAME_ID = "__wr_id";
-export const COOKIE_NAME_TIME = "__wr_last_update";
+export const COOKIE_NAME_ADMISSION = "__wr_admission";
 export const COOKIE_NAME_DEMO_SIMULATION = "__wr_demo";

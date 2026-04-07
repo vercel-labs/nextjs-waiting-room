@@ -1,19 +1,21 @@
 # nextjs-waiting-room
 
-Deploy a waiting room in front of a Next.js route on Vercel. This repo shows how to intercept traffic in `proxy.ts`, admit users atomically in Redis, and preserve the original destination through the full queue flow.
+Deploy a waiting room in front of a Next.js route on Vercel. This repo shows how to keep the protected-route hot path cheap with signed admission tokens, use Redis only for queue transitions, and preserve the original destination through the full queue flow.
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fnextjs-waiting-room&env=WAITING_ROOM_PROVIDER,UPSTASH_REDIS_REST_URL,UPSTASH_REDIS_REST_TOKEN&envDescription=Configure%20your%20waiting%20room%20provider%20and%20Redis%20credentials&envLink=https%3A%2F%2Fgithub.com%2Fvercel%2Fnextjs-waiting-room%23configuration)
 
 ## Features
 
 - Provider-agnostic: Upstash Redis, self-hosted Redis (ioredis), or in-memory (dev)
-- FIFO queue with position tracking (Redis providers)
-- Atomic admission via Lua scripts (no thundering herd)
-- Rolling average wait-time estimation
+- Signed admission token verified locally in `proxy.ts`
+- FIFO queue with monotonic ticket ordering
+- Atomic join-or-admit via Lua scripts (no thundering herd)
+- Bounded Redis operations on hot paths
 - Fail-open circuit breaker (site stays up if Redis is down)
 - Next.js 16 proxy.ts (replaces middleware.ts)
-- Session renewal via waitUntil() (non-blocking)
-- Auto-polling client (5s interval with exponential backoff)
+- Session renewal via `waitUntil()` with infrequent Redis refresh
+- Waiting-room shell that renders before queue status is fetched
+- Adaptive client polling with jitter
 - Namespaced Redis keys (multi-tenant safe)
 - Preserves the original destination through the full queue flow
 
@@ -21,28 +23,30 @@ Deploy a waiting room in front of a Next.js route on Vercel. This repo shows how
 
 If you are reading this repo as a reference architecture, start with these files:
 
-1. `src/proxy.ts` — the hot path for protected routes
-2. `src/lib/waiting-room/service.ts` — the shared decision layer used by Proxy, routes, and pages
-3. `src/app/api/waiting-room/init/route.ts` — the entry point that mints queue identity and redirects into the waiting room
-4. `src/app/api/waiting-room/status/route.ts` — the polling endpoint that moves queued users to admitted users
-5. `src/lib/waiting-room/providers/*.ts` — the provider implementations and atomic Redis admission logic
-6. `src/app/waiting-room/*` — the waiting room UI and queue polling client
+1. `src/proxy.ts` — verifies signed admission locally and only renews sessions occasionally
+2. `src/lib/waiting-room/admission-token.ts` — HMAC-signed admission token minting and verification
+3. `src/lib/waiting-room/service.ts` — the shared decision layer used by Proxy, routes, and pages
+4. `src/app/api/waiting-room/init/route.ts` — mints the stable queue identity and redirects into the waiting room
+5. `src/app/api/waiting-room/status/route.ts` — the queue transition endpoint that can admit and mint a token
+6. `src/lib/waiting-room/providers/*.ts` — provider implementations and atomic Redis admission logic
+7. `src/app/waiting-room/*` — the waiting room shell and adaptive polling client
 
 ## Request Lifecycle
 
 ```mermaid
 flowchart TD
     A["Request for /demo"] --> B["src/proxy.ts"]
-    B --> C{"Has active session?"}
+    B --> C{"Valid admission token?"}
     C -->|Yes| D["Protected route renders"]
     C -->|No| E["/api/waiting-room/init?next=/demo"]
-    E --> F["Set identity cookie"]
+    E --> F["Set stable identity cookie"]
     F --> G["Redirect to /waiting-room?next=/demo"]
-    G --> H["Waiting room page"]
-    H --> I["resolveWaitingRoomStatus()"]
-    I -->|Admitted| J["Redirect back to /demo"]
-    I -->|Queued| K["QueuePositionClient polls /api/waiting-room/status"]
-    K --> I
+    G --> H["Static waiting-room shell renders"]
+    H --> I["QueuePositionClient polls /api/waiting-room/status"]
+    I --> J{"Front of queue + capacity?"}
+    J -->|No| K["Return queued status"]
+    J -->|Yes| L["Mint admission token"]
+    L --> M["Redirect back to /demo"]
 
     style B stroke:#66f,stroke-width:3px
     style E stroke:#f9f,stroke-width:3px
@@ -52,11 +56,12 @@ flowchart TD
 
 ## Why The Repo Is Structured This Way
 
-- `src/proxy.ts` stays thin. Proxy runs on every protected request, so it only reads cookies, asks the service layer for a decision, and refreshes session cookies when needed.
+- `src/proxy.ts` stays lean. The common admitted path is local token verification, not a Redis round-trip.
+- `src/lib/waiting-room/admission-token.ts` isolates the stateless admission model from queue coordination concerns.
 - `src/lib/waiting-room/service.ts` owns state transitions. Proxy, route handlers, and Server Components all reuse the same decisions instead of reimplementing queue logic in multiple places.
-- `src/app/api/waiting-room/init/route.ts` is the single place that creates queue identity. That keeps the first redirect, the waiting room page, and the polling endpoint aligned on the same cookie contract.
-- `src/lib/waiting-room/providers/*.ts` hide backend differences behind one provider interface. The rest of the app does not care whether the backing store is Upstash, ioredis, or the in-memory development provider.
-- `src/app/waiting-room/*` is UI only. The queue policy lives in the service and provider layers, not in React components.
+- `src/app/api/waiting-room/init/route.ts` is the single place that creates queue identity and clears stale admission state.
+- `src/lib/waiting-room/providers/*.ts` hide backend differences behind one provider interface while keeping queue operations atomic.
+- `src/app/waiting-room/*` is UI only. The shell renders quickly and the client adapts its polling cadence based on queue state.
 
 ## Quick Start
 
@@ -86,6 +91,7 @@ flowchart TD
 These files are the core waiting-room architecture you would copy into another app:
 
 - `src/proxy.ts`
+- `src/lib/waiting-room/admission-token.ts`
 - `src/lib/waiting-room/types.ts`
 - `src/lib/waiting-room/config.ts`
 - `src/lib/waiting-room/edge-config.ts`
@@ -115,6 +121,7 @@ These files exist to make the demo easier to understand locally, but they are no
 | Variable | Description | Default |
 | :--- | :--- | :--- |
 | `WAITING_ROOM_PROVIDER` | Backend provider: "upstash", "ioredis", or "memory" | memory |
+| `WAITING_ROOM_TOKEN_SECRET` | HMAC secret for signing admission tokens | required in production |
 | `WAITING_ROOM_CAPACITY` | Max concurrent active users | 100 |
 | `WAITING_ROOM_SESSION_TTL_SECONDS` | Active session duration (seconds) | 300 |
 | `WAITING_ROOM_QUEUE_TTL_SECONDS` | Abandoned queue entry purge time (seconds) | 1800 |
@@ -140,7 +147,7 @@ For production deployments on Vercel, you can use [Edge Config](https://vercel.c
 
 **Precedence:** Edge Config → env vars → hardcoded defaults.
 
-**What stays in env vars only:** Secrets (`UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `REDIS_URL`) and deploy-time decisions (`WAITING_ROOM_PROVIDER`, `WAITING_ROOM_NAMESPACE`) are never read from Edge Config.
+**What stays in env vars only:** Secrets (`UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `REDIS_URL`, `WAITING_ROOM_TOKEN_SECRET`) and deploy-time decisions (`WAITING_ROOM_PROVIDER`, `WAITING_ROOM_NAMESPACE`) are never read from Edge Config.
 
 Edge Config is optional — the waiting room works identically with just env vars.
 
@@ -168,11 +175,12 @@ For local development only.
 
 ## How It Works
 
-- **proxy.ts**: Intercepts requests to validate active sessions. Redirects unauthenticated users to the waiting room.
-- **Lua Script**: Executes atomic check-and-admit operations in Redis, ensuring FIFO ordering and preventing race conditions.
-- **Session Management**: Uses hash-based active sessions to prevent counter drift.
-- **Cleanup**: Automatically purges expired sessions and abandoned queue entries.
-- **Wait Estimation**: Calculates wait times using a rolling average of recent session durations.
+- **`proxy.ts`**: Verifies signed admission tokens locally and only renews active sessions when they are nearing expiry.
+- **Admission token**: Keeps the common admitted path stateless and cheap.
+- **Lua Script**: Executes atomic join-or-admit operations in Redis, ensuring FIFO ordering and preventing race conditions.
+- **Session tracking**: Uses expiry-scored sorted sets instead of scanning active-session hashes.
+- **Queue heartbeat cleanup**: Drops stale queue entries lazily from the front so abandoned users do not permanently block admission.
+- **Adaptive polling**: The client polls quickly near the front of the queue and more slowly when the user is far away.
 
 ## Project Structure
 

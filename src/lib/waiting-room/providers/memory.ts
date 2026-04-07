@@ -6,9 +6,6 @@ interface Session {
 }
 
 export class InMemoryProvider implements WaitingRoomProvider {
-  readonly supportsProxyVerification = false as const;
-  readonly supportsQueue = false as const;
-
   private readonly sessions = new Map<string, Session>();
   private readonly queue: string[] = [];
 

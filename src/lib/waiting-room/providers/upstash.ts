@@ -1,7 +1,7 @@
 import { Redis } from "@upstash/redis";
 import { getConfig, keyFor } from "../config";
 import { TRY_ADMIT_LUA } from "../lua/try-admit";
-import type { AdmitResult, QueuedWaitingRoomProvider } from "../types";
+import type { AdmitResult, WaitingRoomProvider } from "../types";
 
 // ------------------------------------------------------------------
 // Lua script for atomic admission.
@@ -27,9 +27,7 @@ import type { AdmitResult, QueuedWaitingRoomProvider } from "../types";
 //   which Redis treats as data — not executable code. This is the Lua
 //   equivalent of parameterized SQL queries.
 // ------------------------------------------------------------------
-export class UpstashRedisProvider implements QueuedWaitingRoomProvider {
-  readonly supportsProxyVerification = true as const;
-  readonly supportsQueue = true as const;
+export class UpstashRedisProvider implements WaitingRoomProvider {
   private readonly redis: Redis;
   // Upstash Script: .exec() tries EVALSHA first, falls back to EVAL on cache miss,
   // then all subsequent calls use the cached SHA — no full script retransmission.
@@ -44,20 +42,28 @@ export class UpstashRedisProvider implements QueuedWaitingRoomProvider {
   }
 
   async hasSession(userId: string): Promise<boolean> {
-    const expiry = await this.redis.hget<number>(keyFor("active"), userId);
-    return expiry !== null && expiry > Date.now();
+    const expiry = await this.redis.zscore(keyFor("active"), userId);
+    return expiry !== null && Number(expiry) > Date.now();
   }
 
   async renewSession(userId: string): Promise<void> {
     const config = getConfig();
     const newExpiryMs = Date.now() + config.sessionTtlSeconds * 1000;
-    await this.redis.hset(keyFor("active"), { [userId]: newExpiryMs });
+    await this.redis.zadd(keyFor("active"), {
+      score: newExpiryMs,
+      member: userId,
+    });
   }
 
   async tryAdmit(userId: string): Promise<AdmitResult> {
     const config = getConfig();
     const [status, position] = await this.tryAdmitScript.exec(
-      [keyFor("active"), keyFor("queue"), keyFor("durations")],
+      [
+        keyFor("active"),
+        keyFor("queue"),
+        keyFor("heartbeats"),
+        keyFor("ticket-seq"),
+      ],
       [
         config.capacity.toString(),
         userId,
@@ -82,59 +88,7 @@ export class UpstashRedisProvider implements QueuedWaitingRoomProvider {
   }
 
   async getActiveCount(): Promise<number> {
-    const active = await this.redis.hgetall<Record<string, number>>(
-      keyFor("active")
-    );
-    if (!active) {
-      return 0;
-    }
-
-    const now = Date.now();
-    const expired = Object.entries(active)
-      .filter(([, expiry]) => expiry <= now)
-      .map(([uid]) => uid);
-
-    if (expired.length > 0) {
-      await this.redis.hdel(keyFor("active"), ...expired);
-    }
-
-    return Object.keys(active).length - expired.length;
-  }
-
-  async getPosition(userId: string): Promise<number | null> {
-    const rank = await this.redis.zrank(keyFor("queue"), userId);
-    if (rank === null) {
-      return null;
-    }
-    return rank + 1;
-  }
-
-  async getEstimatedWait(
-    userId: string,
-    position?: number | null
-  ): Promise<number> {
-    const resolvedPosition =
-      position === undefined ? await this.getPosition(userId) : position;
-
-    if (resolvedPosition === null) {
-      return -1;
-    }
-
-    const config = getConfig();
-    const durations = await this.redis.lrange<number>(
-      keyFor("durations"),
-      -100,
-      -1
-    );
-
-    let avgDurationMs: number;
-    if (durations.length > 0) {
-      avgDurationMs =
-        durations.reduce((sum, d) => sum + d, 0) / durations.length;
-    } else {
-      avgDurationMs = config.sessionTtlSeconds * 1000;
-    }
-
-    return (resolvedPosition * avgDurationMs) / (config.capacity * 1000);
+    await this.redis.zremrangebyscore(keyFor("active"), "-inf", Date.now());
+    return this.redis.zcard(keyFor("active"));
   }
 }

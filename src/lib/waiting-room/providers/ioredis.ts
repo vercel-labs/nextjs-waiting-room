@@ -1,7 +1,7 @@
 import Redis from "ioredis";
 import { getConfig, keyFor } from "../config";
 import { TRY_ADMIT_LUA } from "../lua/try-admit";
-import type { AdmitResult, QueuedWaitingRoomProvider } from "../types";
+import type { AdmitResult, WaitingRoomProvider } from "../types";
 
 // See upstash.ts for the full explanation of why this script exists,
 // why EVALSHA is preferred over EVAL, and the security model.
@@ -11,9 +11,7 @@ import type { AdmitResult, QueuedWaitingRoomProvider } from "../types";
 // createScript but via the native Redis TCP protocol.
 const COMMAND_NAME = "tryAdmit";
 
-export class IORedisProvider implements QueuedWaitingRoomProvider {
-  readonly supportsProxyVerification = true as const;
-  readonly supportsQueue = true as const;
+export class IORedisProvider implements WaitingRoomProvider {
   private readonly redis: Redis;
 
   constructor(redis?: Redis) {
@@ -22,19 +20,19 @@ export class IORedisProvider implements QueuedWaitingRoomProvider {
 
     this.redis.defineCommand(COMMAND_NAME, {
       lua: TRY_ADMIT_LUA,
-      numberOfKeys: 3,
+      numberOfKeys: 4,
     });
   }
 
   async hasSession(userId: string): Promise<boolean> {
-    const expiry = await this.redis.hget(keyFor("active"), userId);
+    const expiry = await this.redis.zscore(keyFor("active"), userId);
     return expiry !== null && Number(expiry) > Date.now();
   }
 
   async renewSession(userId: string): Promise<void> {
     const config = getConfig();
     const newExpiryMs = Date.now() + config.sessionTtlSeconds * 1000;
-    await this.redis.hset(keyFor("active"), userId, newExpiryMs.toString());
+    await this.redis.zadd(keyFor("active"), newExpiryMs.toString(), userId);
   }
 
   async tryAdmit(userId: string): Promise<AdmitResult> {
@@ -51,7 +49,8 @@ export class IORedisProvider implements QueuedWaitingRoomProvider {
     ).tryAdmit(
       keyFor("active"),
       keyFor("queue"),
-      keyFor("durations"),
+      keyFor("heartbeats"),
+      keyFor("ticket-seq"),
       config.capacity.toString(),
       userId,
       Date.now().toString(),
@@ -76,49 +75,11 @@ export class IORedisProvider implements QueuedWaitingRoomProvider {
   }
 
   async getActiveCount(): Promise<number> {
-    const active = await this.redis.hgetall(keyFor("active"));
-    const now = Date.now();
-    const expired = Object.entries(active)
-      .filter(([, expiry]) => Number(expiry) <= now)
-      .map(([uid]) => uid);
-
-    if (expired.length > 0) {
-      await this.redis.hdel(keyFor("active"), ...expired);
-    }
-
-    return Object.keys(active).length - expired.length;
-  }
-
-  async getPosition(userId: string): Promise<number | null> {
-    const rank = await this.redis.zrank(keyFor("queue"), userId);
-    if (rank === null) {
-      return null;
-    }
-    return rank + 1;
-  }
-
-  async getEstimatedWait(
-    userId: string,
-    position?: number | null
-  ): Promise<number> {
-    const resolvedPosition =
-      position === undefined ? await this.getPosition(userId) : position;
-
-    if (resolvedPosition === null) {
-      return -1;
-    }
-
-    const config = getConfig();
-    const durations = await this.redis.lrange(keyFor("durations"), -100, -1);
-
-    let avgDurationMs: number;
-    if (durations.length > 0) {
-      avgDurationMs =
-        durations.reduce((sum, d) => sum + Number(d), 0) / durations.length;
-    } else {
-      avgDurationMs = config.sessionTtlSeconds * 1000;
-    }
-
-    return (resolvedPosition * avgDurationMs) / (config.capacity * 1000);
+    await this.redis.zremrangebyscore(
+      keyFor("active"),
+      "-inf",
+      Date.now().toString()
+    );
+    return this.redis.zcard(keyFor("active"));
   }
 }

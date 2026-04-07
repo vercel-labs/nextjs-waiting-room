@@ -4,13 +4,16 @@ import { redirect } from "next/navigation";
 import {
   DEFAULT_AFTER_WAITING_ROOM_PATH,
   getSafeRedirectPath,
+  getWaitingRoomInitPath,
 } from "@/lib/waiting-room/cookies";
 import {
   formatEstimatedWait,
   parseDemoSimulationState,
+  resolveDemoQueuedStatus,
 } from "@/lib/waiting-room/demo-simulation";
 import { resolveWaitingRoomPageState } from "@/lib/waiting-room/service";
 import {
+  COOKIE_NAME_ADMISSION,
   COOKIE_NAME_DEMO_SIMULATION,
   COOKIE_NAME_ID,
 } from "@/lib/waiting-room/types";
@@ -25,6 +28,7 @@ export default async function WaitingRoomPage({
 }: WaitingRoomPageProps) {
   const cookieStore = await cookies();
   const userId = cookieStore.get(COOKIE_NAME_ID)?.value;
+  const admissionToken = cookieStore.get(COOKIE_NAME_ADMISSION)?.value;
   const simulation = parseDemoSimulationState(
     cookieStore.get(COOKIE_NAME_DEMO_SIMULATION)?.value
   );
@@ -34,75 +38,15 @@ export default async function WaitingRoomPage({
     nextValue,
     DEFAULT_AFTER_WAITING_ROOM_PATH
   );
-  const state = await resolveWaitingRoomPageState(
-    userId ?? null,
-    nextPath,
-    simulation
-  );
+  if (!userId) {
+    redirect(getWaitingRoomInitPath(nextPath));
+  }
+
+  const state = resolveWaitingRoomPageState(admissionToken, nextPath);
+  const simulatedQueue = resolveDemoQueuedStatus(simulation);
 
   if (state.status === "redirect") {
     redirect(state.destination);
-  }
-
-  if (state.status === "unavailable") {
-    return (
-      <div className="flex min-h-screen flex-col">
-        <header className="border-foreground/10 border-b">
-          <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-5">
-            <Link
-              className="font-mono text-foreground/45 text-xs uppercase tracking-[0.2em] transition hover:text-foreground"
-              href="/"
-            >
-              Next.js Waiting Room
-            </Link>
-            <Link
-              className="font-mono text-foreground/50 text-xs transition hover:text-foreground"
-              href="/"
-            >
-              Overview
-            </Link>
-          </div>
-        </header>
-
-        <main className="flex flex-1 items-center justify-center p-6">
-          <div className="w-full max-w-lg space-y-8 text-center">
-            <div className="space-y-3">
-              <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-amber-500/10">
-                <svg
-                  aria-label="Warning"
-                  className="h-8 w-8 text-amber-500"
-                  fill="none"
-                  role="img"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  viewBox="0 0 24 24"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <title>Warning</title>
-                  <path
-                    d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.72 3h16.92a2 2 0 001.72-3L13.71 3.86a2 2 0 00-3.42 0z"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
-              <h1 className="font-semibold text-3xl tracking-tight">
-                Waiting room unavailable
-              </h1>
-              <p className="text-foreground/60 text-lg">
-                We can&apos;t confirm admission right now. Please try again in a
-                moment.
-              </p>
-            </div>
-
-            <p className="text-foreground/40 text-sm">
-              This demo is running in fail-closed mode, so we&apos;re pausing
-              admission until the backing provider recovers.
-            </p>
-          </div>
-        </main>
-      </div>
-    );
   }
 
   return (
@@ -130,13 +74,13 @@ export default async function WaitingRoomPage({
             Waiting room
           </h1>
 
-          {state.queue.demo ? (
+          {simulatedQueue?.demo ? (
             <div className="font-mono text-foreground/40 text-xs tabular-nums">
-              Simulation: {state.queue.demo.peopleAhead}
+              Simulation: {simulatedQueue.demo.peopleAhead}
               {" ahead · 1 slot every "}
-              {state.queue.demo.slotIntervalSeconds}
+              {simulatedQueue.demo.slotIntervalSeconds}
               {"s · "}
-              {formatEstimatedWait(state.queue.estimatedWait)}
+              {formatEstimatedWait(simulatedQueue.estimatedWait)}
               {" wait · "}
               <Link
                 className="text-foreground/50 transition hover:text-foreground"
@@ -147,10 +91,7 @@ export default async function WaitingRoomPage({
             </div>
           ) : null}
 
-          <QueuePositionClient
-            initialStatus={state.queue}
-            nextPath={nextPath}
-          />
+          <QueuePositionClient nextPath={nextPath} />
         </div>
       </main>
 

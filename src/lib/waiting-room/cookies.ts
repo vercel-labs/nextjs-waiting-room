@@ -21,7 +21,7 @@ export function getIdentityCookieOptions(config: WaitingRoomConfig) {
   };
 }
 
-export function getSessionUpdateCookieOptions(config: WaitingRoomConfig) {
+export function getAdmissionCookieOptions(config: WaitingRoomConfig) {
   return {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",

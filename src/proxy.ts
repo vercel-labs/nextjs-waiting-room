@@ -1,12 +1,12 @@
 import type { NextFetchEvent, NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import {
+  getAdmissionCookieOptions,
   getIdentityCookieOptions,
   getRequestDestinationPath,
-  getSessionUpdateCookieOptions,
 } from "@/lib/waiting-room/cookies";
 import { resolveProxyAccessDecision } from "@/lib/waiting-room/service";
-import { COOKIE_NAME_ID, COOKIE_NAME_TIME } from "@/lib/waiting-room/types";
+import { COOKIE_NAME_ADMISSION, COOKIE_NAME_ID } from "@/lib/waiting-room/types";
 
 /**
  * Keep Proxy lean.
@@ -16,19 +16,13 @@ import { COOKIE_NAME_ID, COOKIE_NAME_TIME } from "@/lib/waiting-room/types";
  * session cookies when needed.
  */
 export async function proxy(request: NextRequest, event: NextFetchEvent) {
-  const userId = request.cookies.get(COOKIE_NAME_ID)?.value ?? null;
   const nextPath = getRequestDestinationPath(
     request.nextUrl.pathname,
     request.nextUrl.search
   );
-  const lastUpdate = Number.parseInt(
-    request.cookies.get(COOKIE_NAME_TIME)?.value ?? "",
-    10
-  );
   const decision = await resolveProxyAccessDecision({
-    lastUpdate,
+    admissionToken: request.cookies.get(COOKIE_NAME_ADMISSION)?.value ?? null,
     nextPath,
-    userId,
   });
 
   if (decision.status === "redirect") {
@@ -45,9 +39,9 @@ export async function proxy(request: NextRequest, event: NextFetchEvent) {
       getIdentityCookieOptions(decision.config)
     );
     response.cookies.set(
-      COOKIE_NAME_TIME,
-      decision.renewedAt.toString(),
-      getSessionUpdateCookieOptions(decision.config)
+      COOKIE_NAME_ADMISSION,
+      decision.admissionToken,
+      getAdmissionCookieOptions(decision.config)
     );
     return response;
   }

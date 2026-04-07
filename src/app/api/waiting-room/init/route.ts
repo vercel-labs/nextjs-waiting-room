@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { resolveConfig } from "@/lib/waiting-room/config";
 import {
   DEFAULT_AFTER_WAITING_ROOM_PATH,
+  getAdmissionCookieOptions,
   getDemoSimulationCookieOptions,
   getIdentityCookieOptions,
   getSafeRedirectPath,
@@ -12,6 +13,7 @@ import {
   serializeDemoSimulationState,
 } from "@/lib/waiting-room/demo-simulation";
 import {
+  COOKIE_NAME_ADMISSION,
   COOKIE_NAME_DEMO_SIMULATION,
   COOKIE_NAME_ID,
 } from "@/lib/waiting-room/types";
@@ -49,6 +51,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     userId,
     getIdentityCookieOptions(config)
   );
+  response.cookies.set(COOKIE_NAME_ADMISSION, "", {
+    ...getAdmissionCookieOptions(config),
+    maxAge: 0,
+  });
 
   const serializedSimulation = serializeDemoSimulationState(simulation);
   if (serializedSimulation) {

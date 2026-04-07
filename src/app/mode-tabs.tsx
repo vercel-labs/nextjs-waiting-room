@@ -29,7 +29,11 @@ function ModeTabsPanel({ children }: ModeTabsPanelProps) {
 function isModeTabsPanelElement(
   child: ReactNode
 ): child is ReactElement<ModeTabsPanelProps> {
-  return isValidElement(child) && child.type === ModeTabsPanel;
+  return (
+    isValidElement<ModeTabsPanelProps>(child) &&
+    typeof child.props.label === "string" &&
+    typeof child.props.value === "string"
+  );
 }
 
 function ModeTabsRoot({ ariaLabel, children, defaultValue }: ModeTabsProps) {

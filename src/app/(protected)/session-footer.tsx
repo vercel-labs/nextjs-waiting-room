@@ -3,13 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 
 interface SessionFooterProps {
-  activeCount: number;
+  activeCount?: number;
   sessionId: string;
 }
 
 export function SessionFooter({ activeCount, sessionId }: SessionFooterProps) {
   const [copied, setCopied] = useState(false);
   const copiedTimeoutRef = useRef<number | null>(null);
+  const statusLabel = activeCount === undefined ? "Admission" : "Active";
+  const statusValue = activeCount === undefined ? "Local" : activeCount;
 
   useEffect(() => {
     return () => {
@@ -45,10 +47,10 @@ export function SessionFooter({ activeCount, sessionId }: SessionFooterProps) {
           <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-green-400" />
         </span>
         <span className="font-mono text-foreground/40 text-xs uppercase tracking-[0.2em]">
-          Active
+          {statusLabel}
         </span>
         <span className="font-mono text-foreground/70 text-xs tabular-nums">
-          {activeCount}
+          {statusValue}
         </span>
         <div className="flex-1" />
         <div className="flex shrink items-center gap-3 overflow-hidden">

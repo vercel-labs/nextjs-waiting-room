@@ -8,17 +8,15 @@ import {
   useRef,
   useState,
 } from "react";
-import type {
-  QueuedWaitingRoomStatus,
-  WaitingRoomStatus,
-} from "@/lib/waiting-room/types";
+import type { WaitingRoomStatus } from "@/lib/waiting-room/types";
 import { QueueJourneyCard } from "./queue-journey-card";
 
-const POLL_INTERVAL_MS = 5000;
+const FAST_POLL_INTERVAL_MS = 5_000;
+const MEDIUM_POLL_INTERVAL_MS = 15_000;
+const SLOW_POLL_INTERVAL_MS = 30_000;
 const MAX_BACKOFF_MS = 60_000;
 
 interface Props {
-  initialStatus: QueuedWaitingRoomStatus;
   nextPath: string;
 }
 
@@ -31,11 +29,41 @@ interface QueueDisplayState {
   totalSlots: number;
 }
 
+function withJitter(intervalMs: number): number {
+  const variance = Math.round(intervalMs * 0.15);
+  const offset = Math.round((Math.random() * 2 - 1) * variance);
+  return Math.max(FAST_POLL_INTERVAL_MS, intervalMs + offset);
+}
+
+function resolveNextPollInterval(status: WaitingRoomStatus | null): number {
+  if (!status || status.status === "unavailable") {
+    return MEDIUM_POLL_INTERVAL_MS;
+  }
+
+  if (status.status !== "queued") {
+    return FAST_POLL_INTERVAL_MS;
+  }
+
+  if (status.estimatedWait >= 15 * 60) {
+    return MAX_BACKOFF_MS;
+  }
+
+  if (status.estimatedWait >= 5 * 60) {
+    return SLOW_POLL_INTERVAL_MS;
+  }
+
+  if (status.estimatedWait >= 60 || (status.position ?? Infinity) > 25) {
+    return MEDIUM_POLL_INTERVAL_MS;
+  }
+
+  return FAST_POLL_INTERVAL_MS;
+}
+
 function resolveQueueDisplayState(
-  status: WaitingRoomStatus,
+  status: WaitingRoomStatus | null,
   clockMs: number
 ): QueueDisplayState {
-  if (status.status !== "queued") {
+  if (!status || status.status !== "queued") {
     return {
       aheadCount: 0,
       displayEstimatedWait: 0,
@@ -88,12 +116,14 @@ function resolveQueueDisplayState(
   };
 }
 
-export function QueuePositionClient({ initialStatus, nextPath }: Props) {
+export function QueuePositionClient({ nextPath }: Props) {
   const router = useRouter();
-  const [status, setStatus] = useState<WaitingRoomStatus>(initialStatus);
+  const [status, setStatus] = useState<WaitingRoomStatus | null>(null);
   const [error, setError] = useState(false);
   const [clockMs, setClockMs] = useState(() => Date.now());
-  const backoffRef = useRef(POLL_INTERVAL_MS);
+  const [loading, setLoading] = useState(true);
+  const backoffRef = useRef(withJitter(MEDIUM_POLL_INTERVAL_MS));
+
   const {
     aheadCount,
     displayEstimatedWait,
@@ -114,8 +144,6 @@ export function QueuePositionClient({ initialStatus, nextPath }: Props) {
         throw new Error(`HTTP ${res.status}`);
       }
 
-      backoffRef.current = POLL_INTERVAL_MS;
-
       if (signal.aborted) {
         return;
       }
@@ -125,8 +153,10 @@ export function QueuePositionClient({ initialStatus, nextPath }: Props) {
         return;
       }
 
+      backoffRef.current = withJitter(resolveNextPollInterval(data));
       startTransition(() => {
         setError(false);
+        setLoading(false);
         setStatus(data);
       });
     } catch (error) {
@@ -137,6 +167,7 @@ export function QueuePositionClient({ initialStatus, nextPath }: Props) {
         return;
       }
 
+      setLoading(false);
       setError(true);
       backoffRef.current = Math.min(backoffRef.current * 2, MAX_BACKOFF_MS);
     }
@@ -159,7 +190,8 @@ export function QueuePositionClient({ initialStatus, nextPath }: Props) {
       });
     };
 
-    timeoutId = setTimeout(tick, POLL_INTERVAL_MS);
+    timeoutId = setTimeout(tick, 0);
+
     return () => {
       active = false;
       controller?.abort();
@@ -184,9 +216,29 @@ export function QueuePositionClient({ initialStatus, nextPath }: Props) {
     };
   }, [simulatedAdmitAt]);
 
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-xl border border-foreground/10 bg-foreground/[0.025] p-4 text-center">
+          <div className="font-mono text-foreground/40 text-xs uppercase tracking-[0.2em]">
+            Finding your place in line
+          </div>
+        </div>
+
+        <div className="flex items-center justify-center gap-1.5 font-mono text-foreground/25 text-xs">
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-green-500" />
+          </span>
+          Checking queue status
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
-      {status.status === "queued" ? (
+      {status?.status === "queued" ? (
         <QueueJourneyCard
           aheadCount={aheadCount}
           estimatedWaitSeconds={displayEstimatedWait}
@@ -203,7 +255,8 @@ export function QueuePositionClient({ initialStatus, nextPath }: Props) {
 
       {error && (
         <div className="text-amber-500 text-sm">
-          Having trouble checking the queue. Retrying...
+          Having trouble checking the queue. Retrying automatically with a
+          slower cadence.
         </div>
       )}
 
